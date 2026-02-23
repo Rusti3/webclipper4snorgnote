@@ -154,3 +154,35 @@ async function sendToSnorgnote({ prompt, urls, title }) {
 ```powershell
 cargo test -- --ignored
 ```
+
+## Саммари версии 0.3.0
+- Добавлено браузерное расширение Chrome/Edge (Manifest V3):
+  - клиппинг всей страницы в markdown,
+  - отправка выделенного текста через контекстное меню (ПКМ),
+  - popup с кнопками `Save full page` и `Save selected text`,
+  - журнал последних ошибок в popup.
+- Добавлен локальный helper API на Node.js:
+  - `POST /clips` для сохранения клипа,
+  - `GET /clips/:clipId` для чтения клипа приложением,
+  - `DELETE /clips/:clipId` для удаления клипа,
+  - `GET /health` для проверки сервиса.
+- Реализована схема передачи больших клипов:
+  - расширение отправляет контент в `http://127.0.0.1:27124/clips`,
+  - открывает deep-link `snorgnote://new?clipId=...&source=web-clipper`.
+- Добавлены тесты helper API (`tests/helper.server.test.js`), сценарии проходят.
+
+### Новые файлы версии 0.3.0
+- `manifest.json`
+- `package.json`
+- `src/extension/background.js`
+- `src/extension/content.js`
+- `src/extension/popup.html`
+- `src/extension/popup.css`
+- `src/extension/popup.js`
+- `src/helper/server.js`
+- `tests/helper.server.test.js`
+
+### Проверка
+```powershell
+npm test
+```

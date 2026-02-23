@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Snorgnote Clipper</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="popup">
+      <h1>Snorgnote Clipper</h1>
+      <p class="subtitle">Send page content or selected text to your app.</p>
+
+      <button id="clip-page" type="button">Save full page</button>
+      <button id="clip-selection" type="button">Save selected text</button>
+
+      <p id="status" class="status" role="status" aria-live="polite">Ready</p>
+
+      <details class="errors">
+        <summary>Recent errors</summary>
+        <ul id="error-list"></ul>
+      </details>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
