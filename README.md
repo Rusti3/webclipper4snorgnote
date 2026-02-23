@@ -1,188 +1,79 @@
-# notebooklm_runner
+﻿# notebooklm_runner
 
-CLI-приложение для сценария:
+Проект принимает клипы из расширения `add4snorgnoteV3` и сохраняет их как локальные Markdown-заметки.
 
-`start.txt -> NotebookLM -> end.txt`
+## Саммари версии 0.3.0
+- Полностью убран пользовательский поток NotebookLM (`start.txt/end.txt`, sidecar Playwright и связанные команды).
+- Добавлена поддержка deep-link формата расширения v3:
+  - `snorgnote://new?clipId=<uuid>&source=web-clipper`
+- Добавлен клиент helper API:
+  - `GET /clips/:clipId`
+  - `DELETE /clips/:clipId`
+  - `GET /health`
+- Добавлено сохранение клипов в `./notes/*.md` с метаданными.
+- После успешного сохранения заметки клип удаляется из helper (`DELETE /clips/:clipId`).
+- Добавлены новые тесты deep-link/helper/writer/full-flow.
 
-С поддержкой deep-link входа от web clipper:
+## Что изменилось для пользователя
+- Из расширения `add4snorgnoteV3` теперь можно открыть приложение deep-link'ом, и заметка создастся автоматически.
+- Не нужно вручную копировать содержимое страницы или выделение.
 
-`snorgnote://clip?data=<base64url(json)>`
+## Протокол интеграции с add4snorgnoteV3
 
-## Саммари версии 0.1.0
-- Реализован one-shot CLI сценарий `start.txt -> NotebookLM -> end.txt`.
-- Добавлен Rust-оркестратор с командами sidecar:
-  - `connect`
-  - `create_notebook`
-  - `import_urls`
-  - `ask`
-  - `close`
-- Добавлен Node.js sidecar на Playwright с persistent профилем.
-- Добавлено логирование в `logs/notebooklm-YYYYMMDD.log`.
-- Добавлены unit и mock e2e тесты.
+### Расширение отправляет deep-link
+`snorgnote://new?clipId=<uuid>&source=web-clipper`
 
-## Саммари версии 0.2.0
-- Добавлен deep-link вход:
-  - новая CLI команда `deeplink`
-  - формат: `snorgnote://clip?data=<base64url(json)>`
-- Добавлен модуль `src/deeplink.rs`:
-  - парсинг deep-link URI
-  - декодирование `data` (base64url + JSON)
-  - fallback-режим query-параметров (`prompt`, `url`)
-  - валидация payload (prompt + минимум 1 валидный URL)
-  - запись `start.txt` из payload
-- Добавлена функция `run_from_deeplink(...)`:
-  - принимает deep-link
-  - генерирует `start.txt`
-  - запускает существующий pipeline до `end.txt`
-- Если в payload есть `title`, он приоритетнее CLI `--title`.
-- Добавлены тесты deep-link:
-  - `tests/deeplink_tests.rs`
-  - `tests/deeplink_flow.rs`
+### Приложение обращается к helper
+- `GET http://127.0.0.1:27124/clips/<clipId>`
+- `DELETE http://127.0.0.1:27124/clips/<clipId>` после успешного сохранения
 
-## Установка
-1. Установить зависимости sidecar:
-
-```powershell
-cd sidecar
-npm install
-cd ..
+### Формат payload helper
+```json
+{
+  "type": "full_page",
+  "title": "Page title",
+  "url": "https://example.com",
+  "contentMarkdown": "markdown content",
+  "createdAt": "2026-02-24T00:00:00.000Z"
+}
 ```
 
-2. Проверить тесты:
+## Запуск
 
+### 1) Запустить helper из проекта расширения
+```powershell
+cd D:\Snorgnote\add4snorgnoteV3
+npm install
+npm run helper:start
+```
+
+### 2) Проверить helper из нашего приложения
+```powershell
+cd D:\add4snorgnote
+cargo run -- helper-health
+```
+
+### 3) Обработать deep-link
+```powershell
+cargo run -- deeplink "snorgnote://new?clipId=<uuid>&source=web-clipper"
+```
+
+Параметры:
+- `--notes-dir` (по умолчанию `notes`)
+- `--helper-base-url` (по умолчанию `http://127.0.0.1:27124`)
+- `--timeout-sec` (по умолчанию `15`)
+
+## Где лежат заметки
+- По умолчанию: `./notes`
+- Формат имени: `YYYYMMDD-HHMMSS-<slug-title>-<clipId8>.md`
+
+## Тесты
 ```powershell
 cargo test
 ```
 
-## Запуск обычного сценария
-```powershell
-cargo run -- run --input start.txt --output end.txt --title "Auto Notebook"
-```
-
-## Формат start.txt
-- Первая непустая строка: `PROMPT=...`
-- Далее: URL по одному в строке.
-- Пустые строки и строки с `#` игнорируются.
-
-Пример:
-
-```txt
-PROMPT=Сделай краткое резюме источников и 5 ключевых тезисов.
-https://example.com/article
-https://youtu.be/example
-```
-
-## Deep-link режим
-Запуск через CLI:
-
-```powershell
-cargo run -- deeplink "snorgnote://clip?data=..." --input start.txt --output end.txt
-```
-
-При вызове:
-1. URI декодируется в payload.
-2. Из payload записывается `start.txt`.
-3. Выполняется pipeline NotebookLM.
-4. Ответ пишется в `end.txt`.
-
-## Контракт payload для web clipper
-JSON внутри `data`:
-
-```json
-{
-  "prompt": "Сделай резюме и 5 тезисов",
-  "urls": [
-    "https://example.com/a",
-    "https://example.com/b"
-  ],
-  "source": "web-clipper",
-  "title": "Notebook from clipper"
-}
-```
-
-Поля:
-- `prompt` (обязательно)
-- `urls` (обязательно, минимум 1 URL)
-- `source` (опционально)
-- `title` (опционально; переопределяет `--title`)
-
-## Что добавить в проект web clipper (Chrome Extension MV3)
-### 1. Функция base64url + открытие deep-link
-```js
-function toBase64UrlUtf8(obj) {
-  const json = JSON.stringify(obj);
-  const bytes = new TextEncoder().encode(json);
-  let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-async function sendToSnorgnote({ prompt, urls, title }) {
-  const payload = {
-    prompt,
-    urls,
-    source: "web-clipper",
-    title
-  };
-  const data = toBase64UrlUtf8(payload);
-  const deeplink = `snorgnote://clip?data=${data}`;
-  await chrome.tabs.create({ url: deeplink });
-}
-```
-
-### 2. Где вызывать
-- В обработчике кнопки “Send to Snorgnote”.
-- Перед вызовом отфильтровать пустые и дублирующиеся URL.
-
-### 3. Важный момент по ОС
-Чтобы deep-link реально открывал приложение, в системе должен быть зарегистрирован обработчик схемы `snorgnote://`.
-
-Для desktop-приложения на Tauri это обычно делается в конфиге приложения/инсталлере.  
-Для текущего CLI можно настроить handler через системную регистрацию протокола (Windows registry / installer).
-
-## Формат end.txt
-Секции:
-- `Status`
-- `Notebook`
-- `Prompt`
-- `Imported`
-- `Answer`
-- `Errors`
-- `Timing`
-
-## Live тест (ручной)
-```powershell
-cargo test -- --ignored
-```
-
-## Саммари версии 0.3.0
-- Добавлено браузерное расширение Chrome/Edge (Manifest V3):
-  - клиппинг всей страницы в markdown,
-  - отправка выделенного текста через контекстное меню (ПКМ),
-  - popup с кнопками `Save full page` и `Save selected text`,
-  - журнал последних ошибок в popup.
-- Добавлен локальный helper API на Node.js:
-  - `POST /clips` для сохранения клипа,
-  - `GET /clips/:clipId` для чтения клипа приложением,
-  - `DELETE /clips/:clipId` для удаления клипа,
-  - `GET /health` для проверки сервиса.
-- Реализована схема передачи больших клипов:
-  - расширение отправляет контент в `http://127.0.0.1:27124/clips`,
-  - открывает deep-link `snorgnote://new?clipId=...&source=web-clipper`.
-- Добавлены тесты helper API (`tests/helper.server.test.js`), сценарии проходят.
-
-### Новые файлы версии 0.3.0
-- `manifest.json`
-- `package.json`
-- `src/extension/background.js`
-- `src/extension/content.js`
-- `src/extension/popup.html`
-- `src/extension/popup.css`
-- `src/extension/popup.js`
-- `src/helper/server.js`
-- `tests/helper.server.test.js`
-
-### Проверка
-```powershell
-npm test
-```
+Текущий набор:
+- `tests/deeplink_new_tests.rs`
+- `tests/helper_client_tests.rs`
+- `tests/note_writer_tests.rs`
+- `tests/clipper_flow_tests.rs`

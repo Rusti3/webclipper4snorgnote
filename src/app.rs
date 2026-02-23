@@ -1,206 +1,79 @@
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::Duration;
 
-use anyhow::{Result, bail};
-use serde_json::json;
+use anyhow::Result;
+use uuid::Uuid;
 
-use crate::bridge::process::{BridgeClient, BridgeProcessConfig};
-use crate::deeplink::{parse_clip_uri, write_start_file_from_payload};
-use crate::io::end_writer::{EndReport, ImportFailure, write_end_file};
-use crate::io::start_parser::parse_start_file;
+use crate::deeplink::parse_new_clip_deeplink;
+use crate::helper_client::{HelperClient, HelperHealth};
 use crate::logging::AppLogger;
+use crate::notes::writer::{NoteData, write_markdown_note};
 
 #[derive(Debug, Clone)]
-pub struct RunnerConfig {
-    pub input: PathBuf,
-    pub output: PathBuf,
-    pub title: String,
-    pub sidecar_script: PathBuf,
-    pub node_path: PathBuf,
-    pub profile_dir: Option<PathBuf>,
-    pub browser_path: Option<PathBuf>,
+pub struct AppConfig {
+    pub notes_dir: PathBuf,
+    pub helper_base_url: String,
     pub timeout_sec: u64,
 }
 
-pub fn run_once(config: &RunnerConfig) -> Result<()> {
-    let started_at = Instant::now();
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClipRunResult {
+    pub clip_id: Uuid,
+    pub note_path: PathBuf,
+    pub delete_error: Option<String>,
+}
+
+pub fn run_from_new_deeplink(uri: &str, config: &AppConfig) -> Result<ClipRunResult> {
     let logger = AppLogger::new()?;
-    logger.info("run started");
+    logger.info("clipper run started");
 
-    let mut report = EndReport {
-        status: "failed".to_string(),
-        notebook_title: Some(config.title.clone()),
-        notebook_url: None,
-        prompt: String::new(),
-        answer: None,
-        imported: 0,
-        failed: Vec::new(),
-        errors: Vec::new(),
-        duration_ms: 0,
-    };
+    let deep_link = parse_new_clip_deeplink(uri)?;
+    logger.info(&format!("deep-link parsed: clipId={}", deep_link.clip_id));
 
-    let parsed_input = match parse_start_file(&config.input) {
-        Ok(input) => {
-            report.prompt = input.prompt.clone();
-            input
-        }
-        Err(err) => {
-            report
-                .errors
-                .push(format!("Failed to parse start.txt: {err:#}"));
-            finalize_run(config, &logger, &mut report, started_at)?;
-            bail!("Failed to parse start.txt");
-        }
-    };
+    let helper = HelperClient::new(
+        config.helper_base_url.clone(),
+        Duration::from_secs(config.timeout_sec.max(1)),
+    )?;
+    let clip = helper.fetch_clip(deep_link.clip_id)?;
+    logger.info("clip payload fetched from helper");
 
-    match BridgeClient::spawn(
-        BridgeProcessConfig {
-            node_path: config.node_path.clone(),
-            sidecar_script: config.sidecar_script.clone(),
-            profile_dir: config.profile_dir.clone(),
-            browser_path: config.browser_path.clone(),
-            timeout_sec: config.timeout_sec,
+    let note_path = write_markdown_note(
+        &config.notes_dir,
+        &NoteData {
+            clip_id: clip.clip_id,
+            source: deep_link.source,
+            clip_type: clip.payload.clip_type.to_string(),
+            title: clip.payload.title,
+            url: clip.payload.url,
+            content_markdown: clip.payload.content_markdown,
+            created_at: clip.payload.created_at,
         },
-        logger.clone(),
-    ) {
-        Ok(mut bridge) => {
-            let mut pipeline_ok = true;
+    )?;
+    logger.info(&format!("note saved: {}", note_path.display()));
 
-            if let Err(err) = bridge.send_command("connect", json!({})) {
-                report.errors.push(format!("connect failed: {err:#}"));
-                pipeline_ok = false;
-            }
-
-            if pipeline_ok {
-                match bridge
-                    .send_command("create_notebook", json!({ "title": config.title.clone() }))
-                {
-                    Ok(data) => {
-                        report.notebook_title = data
-                            .get("title")
-                            .and_then(|v| v.as_str())
-                            .map(str::to_string)
-                            .or_else(|| Some(config.title.clone()));
-                        report.notebook_url =
-                            data.get("url").and_then(|v| v.as_str()).map(str::to_string);
-                    }
-                    Err(err) => {
-                        report
-                            .errors
-                            .push(format!("create_notebook failed: {err:#}"));
-                        pipeline_ok = false;
-                    }
-                }
-            }
-
-            if pipeline_ok {
-                match bridge
-                    .send_command("import_urls", json!({ "urls": parsed_input.urls.clone() }))
-                {
-                    Ok(data) => {
-                        report.imported =
-                            data.get("imported").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                        report.failed = parse_import_failures(&data);
-                    }
-                    Err(err) => {
-                        report.errors.push(format!("import_urls failed: {err:#}"));
-                        pipeline_ok = false;
-                    }
-                }
-            }
-
-            if pipeline_ok {
-                match bridge.send_command("ask", json!({ "prompt": parsed_input.prompt.clone() })) {
-                    Ok(data) => {
-                        report.answer = data
-                            .get("answer")
-                            .and_then(|v| v.as_str())
-                            .map(str::to_string);
-                        if report
-                            .answer
-                            .as_deref()
-                            .unwrap_or_default()
-                            .trim()
-                            .is_empty()
-                        {
-                            report
-                                .errors
-                                .push("ask succeeded but returned empty answer".to_string());
-                            pipeline_ok = false;
-                        }
-                    }
-                    Err(err) => {
-                        report.errors.push(format!("ask failed: {err:#}"));
-                        pipeline_ok = false;
-                    }
-                }
-            }
-
-            if let Err(err) = bridge.close() {
-                report.errors.push(format!("bridge close failed: {err:#}"));
-            }
-
-            if pipeline_ok && report.errors.is_empty() {
-                report.status = "ok".to_string();
-            }
+    let delete_error = match helper.delete_clip(clip.clip_id) {
+        Ok(()) => {
+            logger.info("clip deleted from helper");
+            None
         }
         Err(err) => {
-            report
-                .errors
-                .push(format!("failed to start bridge process: {err:#}"));
+            let message = format!("{err:#}");
+            logger.warn(&format!("failed to delete clip from helper: {message}"));
+            Some(message)
         }
-    }
-
-    finalize_run(config, &logger, &mut report, started_at)?;
-    if report.status == "ok" {
-        Ok(())
-    } else {
-        bail!("Run failed. See {} for details", config.output.display())
-    }
-}
-
-pub fn run_from_deeplink(uri: &str, config: &RunnerConfig) -> Result<()> {
-    let payload = parse_clip_uri(uri)?;
-    write_start_file_from_payload(&config.input, &payload)?;
-
-    let mut run_config = config.clone();
-    if let Some(title) = payload.title {
-        run_config.title = title;
-    }
-
-    run_once(&run_config)
-}
-
-fn parse_import_failures(data: &serde_json::Value) -> Vec<ImportFailure> {
-    let Some(items) = data.get("failed").and_then(|v| v.as_array()) else {
-        return Vec::new();
     };
 
-    items
-        .iter()
-        .map(|item| ImportFailure {
-            url: item
-                .get("url")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown")
-                .to_string(),
-            reason: item
-                .get("reason")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown")
-                .to_string(),
-        })
-        .collect()
+    Ok(ClipRunResult {
+        clip_id: clip.clip_id,
+        note_path,
+        delete_error,
+    })
 }
 
-fn finalize_run(
-    config: &RunnerConfig,
-    logger: &AppLogger,
-    report: &mut EndReport,
-    started_at: Instant,
-) -> Result<()> {
-    report.duration_ms = started_at.elapsed().as_millis();
-    write_end_file(&config.output, report)?;
-    logger.info(&format!("run finished with status={}", report.status));
-    Ok(())
+pub fn check_helper_health(config: &AppConfig) -> Result<HelperHealth> {
+    let helper = HelperClient::new(
+        config.helper_base_url.clone(),
+        Duration::from_secs(config.timeout_sec.max(1)),
+    )?;
+    helper.health()
 }
