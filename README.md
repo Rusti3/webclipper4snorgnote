@@ -1,5 +1,17 @@
 # notebooklm_runner
 
+## Саммари версии 0.4.5
+- Изменён источник запуска deep-link: теперь запуск делается из extension-контекста (`chrome-extension://...`), а не из страницы сайта.
+- Для `popup`:
+  - после успешного capture popup сам открывает `snorgnote://...`.
+- Для `context menu`:
+  - background автоматически открывает `launcher.html` (страница расширения),
+  - launcher запускает deep-link и пробует автозакрыться через ~1.2 секунды.
+- Удалён запуск `open_deeplink` из `content.js`, чтобы браузер не показывал источник как сайт.
+- Добавлены Node-тесты:
+  - `tests/extension.popup.test.js`
+  - `tests/extension.launcher.test.js`
+
 Проект принимает клипы из browser extension и сохраняет их в Markdown-заметки.
 ## Саммари версии 0.4.4
 - Изменён способ запуска deep-link из расширения:
@@ -98,6 +110,8 @@ cargo run -- deeplink "snorgnote://new?data=<...>"
 - `manifest.json`
 - `src/extension/background.js`
 - `src/extension/content.js`
+- `src/extension/launcher.html`
+- `src/extension/launcher.js`
 - `src/extension/payload.js`
 - `src/extension/popup.*`
 
@@ -113,3 +127,5 @@ cargo run -- deeplink "snorgnote://new?data=<...>"
 - `tests/extension.payload.test.js`
 - `tests/extension.background.test.js`
 - `tests/extension.content.test.js`
+- `tests/extension.popup.test.js`
+- `tests/extension.launcher.test.js`

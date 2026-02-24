@@ -10,6 +10,7 @@ function loadBackground({ sendMessageResult, sendMessageError } = {}) {
   const calls = {
     sendMessage: [],
     create: [],
+    getURL: [],
   };
 
   const listeners = {
@@ -53,6 +54,18 @@ function loadBackground({ sendMessageResult, sendMessageError } = {}) {
         if (typeof sendMessageResult !== "undefined") {
           return sendMessageResult;
         }
+        if (payload && payload.type === "extract_page") {
+          return {
+            title: "Example title",
+            url: "https://example.com/article",
+            contentMarkdown: "Article body",
+          };
+        }
+        if (payload && payload.type === "extract_selection") {
+          return {
+            selectionText: "Selected from content script",
+          };
+        }
         return { ok: true };
       },
       async create(payload) {
@@ -61,6 +74,10 @@ function loadBackground({ sendMessageResult, sendMessageError } = {}) {
       },
     },
     runtime: {
+      getURL(value) {
+        calls.getURL.push(value);
+        return `chrome-extension://cnjifjpddelmedmihgijeibhnjfabmlf/${value}`;
+      },
       onInstalled: {
         addListener(handler) {
           listeners.onInstalled = handler;
@@ -82,6 +99,7 @@ function loadBackground({ sendMessageResult, sendMessageError } = {}) {
   const context = {
     console,
     chrome,
+    URLSearchParams,
     importScripts() {},
     setTimeout() {
       return 0;
@@ -108,7 +126,7 @@ function loadBackground({ sendMessageResult, sendMessageError } = {}) {
 
   vm.createContext(context);
   const source = fs.readFileSync(BACKGROUND_PATH, "utf8");
-  const testExports = "\n;globalThis.__test__ = { openAppWithPayload };";
+  const testExports = "\n;globalThis.__test__ = { buildLauncherUrl, openLauncherTab };";
   vm.runInContext(`${source}${testExports}`, context, { filename: "background.js" });
 
   return {
@@ -118,41 +136,70 @@ function loadBackground({ sendMessageResult, sendMessageError } = {}) {
   };
 }
 
-test("openAppWithPayload sends deep-link to current tab via content script", async () => {
-  const { api, calls } = loadBackground({ sendMessageResult: { ok: true } });
+async function sendRuntimeMessage(listeners, message) {
+  return new Promise((resolve, reject) => {
+    if (typeof listeners.onRuntimeMessage !== "function") {
+      reject(new Error("runtime listener is missing"));
+      return;
+    }
 
-  const encoded = await api.openAppWithPayload(7, {
-    type: "selection",
-    title: "Hello",
-    url: "https://example.com",
-    contentMarkdown: "text",
-    createdAt: "2026-02-24T00:00:00.000Z",
-    source: "web-clipper",
+    const timeout = setTimeout(() => {
+      reject(new Error("runtime response timeout"));
+    }, 150);
+
+    listeners.onRuntimeMessage(message, {}, (response) => {
+      clearTimeout(timeout);
+      resolve(response);
+    });
   });
+}
 
-  assert.equal(encoded.deepLink, "snorgnote://new?data=test");
-  assert.equal(calls.sendMessage.length, 1);
-  assert.equal(calls.sendMessage[0].tabId, 7);
-  assert.equal(calls.sendMessage[0].payload.type, "open_deeplink");
-  assert.equal(calls.sendMessage[0].payload.deepLink, "snorgnote://new?data=test");
+function waitForAsyncTasks() {
+  return new Promise((resolve) => setTimeout(resolve, 20));
+}
+
+test("popup capture returns deep-link without opening extra tab", async () => {
+  const { calls, listeners } = loadBackground();
+  const response = await sendRuntimeMessage(listeners, { type: "capture_page" });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.deepLink, "snorgnote://new?data=test");
   assert.equal(calls.create.length, 0);
+  assert.equal(
+    calls.sendMessage.some((call) => call.payload && call.payload.type === "open_deeplink"),
+    false,
+  );
 });
 
-test("openAppWithPayload surfaces content-script launch errors", async () => {
-  const { api } = loadBackground({
-    sendMessageResult: { ok: false, error: "Blocked by page policy" },
-  });
+test("context menu capture opens extension launcher tab", async () => {
+  const { calls, listeners } = loadBackground();
+  assert.equal(typeof listeners.onContextMenuClicked, "function");
 
-  await assert.rejects(
-    () =>
-      api.openAppWithPayload(7, {
-        type: "selection",
-        title: "Hello",
-        url: "https://example.com",
-        contentMarkdown: "text",
-        createdAt: "2026-02-24T00:00:00.000Z",
-        source: "web-clipper",
-      }),
-    /Blocked by page policy/,
+  listeners.onContextMenuClicked(
+    {
+      menuItemId: "snorgnote-send-selection",
+      selectionText: "Selected from context menu",
+    },
+    {
+      id: 77,
+      url: "https://example.com/read",
+      title: "Read page",
+    },
+  );
+
+  await waitForAsyncTasks();
+
+  assert.equal(calls.create.length, 1);
+  assert.equal(calls.getURL.length >= 1, true);
+  assert.equal(
+    calls.create[0].url.startsWith(
+      "chrome-extension://cnjifjpddelmedmihgijeibhnjfabmlf/src/extension/launcher.html",
+    ),
+    true,
+  );
+  assert.equal(calls.create[0].url.includes("deeplink="), true);
+  assert.equal(
+    calls.sendMessage.some((call) => call.payload && call.payload.type === "open_deeplink"),
+    false,
   );
 });

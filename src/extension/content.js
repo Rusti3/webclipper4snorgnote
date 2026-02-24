@@ -312,35 +312,6 @@ function extractSelection() {
   return text.trim();
 }
 
-function isSnorgnoteDeepLink(deepLink) {
-  return typeof deepLink === "string" && /^snorgnote:\/\//i.test(deepLink.trim());
-}
-
-function launchDeepLinkOnPage(deepLink) {
-  if (!isSnorgnoteDeepLink(deepLink)) {
-    throw new Error("Invalid deep-link URL.");
-  }
-
-  const host = document.body || document.documentElement;
-  if (!host || typeof host.appendChild !== "function") {
-    throw new Error("Cannot launch Snorgnote from this page.");
-  }
-
-  const anchor = document.createElement("a");
-  anchor.href = deepLink.trim();
-  anchor.rel = "noopener noreferrer";
-  anchor.target = "_self";
-
-  host.appendChild(anchor);
-  try {
-    anchor.click();
-  } finally {
-    if (typeof host.removeChild === "function") {
-      host.removeChild(anchor);
-    }
-  }
-}
-
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== "string") {
     return;
@@ -353,18 +324,5 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "extract_selection") {
     sendResponse({ selectionText: extractSelection() });
-    return;
-  }
-
-  if (message.type === "open_deeplink") {
-    try {
-      launchDeepLinkOnPage(message.deepLink);
-      sendResponse({ ok: true });
-    } catch (error) {
-      const details = error && typeof error.message === "string"
-        ? error.message
-        : "Failed to launch application.";
-      sendResponse({ ok: false, error: details });
-    }
   }
 });

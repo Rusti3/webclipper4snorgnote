@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Snorgnote Launcher</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+        background: #f6f8fc;
+        color: #18212f;
+      }
+      main {
+        max-width: 560px;
+        margin: 48px auto;
+        padding: 18px;
+        border-radius: 12px;
+        background: #ffffff;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 18px;
+      }
+      #status {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.4;
+        color: #334155;
+      }
+      #status.error {
+        color: #b91c1c;
+      }
+      #status.ok {
+        color: #166534;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Snorgnote Launcher</h1>
+      <p id="status">Launching Snorgnote...</p>
+    </main>
+    <script src="launcher.js"></script>
+  </body>
+</html>

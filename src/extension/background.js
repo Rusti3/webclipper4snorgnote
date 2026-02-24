@@ -94,48 +94,31 @@ function markdownFromSelection(selectionText, pageUrl) {
   return `${body}${source}`;
 }
 
-async function launchDeepLinkOnCurrentTab(tabId, deepLink) {
-  let response;
-  try {
-    response = await chrome.tabs.sendMessage(tabId, {
-      type: "open_deeplink",
-      deepLink,
-    });
-  } catch {
-    throw new Error(
-      "Cannot launch Snorgnote from this page. Open a regular website page and try again.",
-    );
-  }
-
-  if (!response || typeof response !== "object") {
-    throw new Error(
-      "Cannot launch Snorgnote from this page. Open a regular website page and try again.",
-    );
-  }
-
-  if (!response.ok) {
-    const message = typeof response.error === "string" && response.error.trim()
-      ? response.error.trim()
-      : "Cannot launch Snorgnote from this page. Open a regular website page and try again.";
-    throw new Error(message);
-  }
-}
-
-async function openAppWithPayload(tabId, payload) {
-  if (typeof tabId !== "number") {
-    throw new Error("No active tab found.");
-  }
+async function encodePayloadToDeepLink(payload) {
   if (!self.SnorgPayload || typeof self.SnorgPayload.clipPayloadToDeepLink !== "function") {
     throw new Error("Payload encoder is not available.");
   }
-
-  const encoded = self.SnorgPayload.clipPayloadToDeepLink(payload);
-  await launchDeepLinkOnCurrentTab(tabId, encoded.deepLink);
-  return encoded;
+  return self.SnorgPayload.clipPayloadToDeepLink(payload);
 }
 
-async function dispatchClip(tabId, payload) {
-  const encoded = await openAppWithPayload(tabId, payload);
+function buildLauncherUrl(deepLink) {
+  if (typeof deepLink !== "string" || !deepLink.trim()) {
+    throw new Error("Deep-link payload is missing.");
+  }
+  const base = chrome.runtime.getURL("src/extension/launcher.html");
+  const params = new URLSearchParams({
+    deeplink: deepLink.trim(),
+  });
+  return `${base}?${params.toString()}`;
+}
+
+async function openLauncherTab(deepLink) {
+  const launcherUrl = buildLauncherUrl(deepLink);
+  await chrome.tabs.create({ url: launcherUrl });
+}
+
+async function dispatchClip(payload) {
+  const encoded = await encodePayloadToDeepLink(payload);
   return {
     deepLink: encoded.deepLink,
     clipped: encoded.clipped,
@@ -162,7 +145,7 @@ async function capturePage(tab) {
     source: "web-clipper",
   };
 
-  return dispatchClip(tab.id, payload);
+  return dispatchClip(payload);
 }
 
 async function captureSelection(tab, selectionFromMenu = "") {
@@ -187,7 +170,7 @@ async function captureSelection(tab, selectionFromMenu = "") {
     source: "web-clipper",
   };
 
-  return dispatchClip(tab.id, payload);
+  return dispatchClip(payload);
 }
 
 async function runClipAction(context, action) {
@@ -236,13 +219,15 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 
   runClipAction("context_menu_selection", () => captureSelection(tab, info.selectionText || ""))
-    .then((result) => {
+    .then(async (result) => {
       if (result.ok) {
+        await openLauncherTab(result.deepLink);
         return flashBadge("OK", "#16a34a");
       }
       return flashBadge("ERR", "#dc2626");
     })
-    .catch(() => {
+    .catch(async (error) => {
+      await saveErrorLog("context_menu_launcher", error);
       flashBadge("ERR", "#dc2626");
     });
 });
