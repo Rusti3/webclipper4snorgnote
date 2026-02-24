@@ -71,13 +71,13 @@ async function runCaptureAction(type) {
     }
 
     if (result.launchedInPage !== true) {
-      setStatus("error", "Cannot confirm launch in current page. Try again.");
+      setStatus("error", "Cannot confirm launch from extension context. Try again.");
       await refreshRecentErrors();
       return;
     }
 
     const clippedLabel = result.clipped ? " (clipped)" : "";
-    setStatus("ok", `Launch requested from current page${clippedLabel}.`);
+    setStatus("ok", `Launch requested from extension context${clippedLabel}.`);
     await refreshRecentErrors();
   } catch (error) {
     setStatus("error", `Unexpected error: ${error.message || String(error)}`);

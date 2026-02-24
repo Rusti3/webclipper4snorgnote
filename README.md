@@ -1,5 +1,12 @@
 ﻿# notebooklm_runner
 
+## Саммари версии 0.4.7
+- Для кнопок `Save full page` и `Save selected text` запуск deep-link перенесён в `background` через `chrome.tabs.update(activeTabId, { url: "snorgnote://..." })`.
+- Теперь системное подтверждение браузера показывает инициатором расширение (`chrome-extension://...`), а не текущий сайт.
+- Popup остаётся открытым и показывает статус запуска из extension-контекста.
+- Добавлен тест ошибки запуска при падении `tabs.update`.
+- Node-тесты обновлены и проходят полностью.
+
 ## Саммари версии 0.4.6
 - Для кнопок `Save full page` и `Save selected text` в popup запуск `snorgnote://...` теперь делается из текущей активной страницы через `content script`.
 - Подтверждение браузера (`Сайт ... собирается открыть это приложение`) теперь показывается на той странице, с которой делается клиппинг, а не в окне расширения.
@@ -136,4 +143,5 @@ cargo run -- deeplink "snorgnote://new?data=<...>"
 - `tests/extension.content.test.js`
 - `tests/extension.popup.test.js`
 - `tests/extension.launcher.test.js`
+
 

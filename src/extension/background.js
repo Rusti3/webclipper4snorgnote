@@ -133,21 +133,10 @@ async function launchDeepLinkInTab(tabId, deepLink) {
     throw new Error("Generated deep-link is invalid.");
   }
 
-  let response;
   try {
-    response = await chrome.tabs.sendMessage(tabId, {
-      type: "open_deeplink",
-      deepLink: normalized,
-    });
+    await chrome.tabs.update(tabId, { url: normalized });
   } catch {
-    throw new Error("Cannot launch Snorgnote from this page.");
-  }
-
-  if (!response || response.ok !== true) {
-    const message = response && typeof response.error === "string"
-      ? response.error
-      : "Cannot launch Snorgnote from this page.";
-    throw new Error(message);
+    throw new Error("Cannot launch Snorgnote from extension context.");
   }
 }
 

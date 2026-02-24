@@ -6,11 +6,12 @@ const vm = require("node:vm");
 
 const BACKGROUND_PATH = path.join(__dirname, "..", "src", "extension", "background.js");
 
-function loadBackground({ sendMessageResult, sendMessageError } = {}) {
+function loadBackground({ sendMessageResult, sendMessageError, updateError } = {}) {
   const calls = {
     sendMessage: [],
     create: [],
     getURL: [],
+    update: [],
   };
 
   const listeners = {
@@ -71,6 +72,13 @@ function loadBackground({ sendMessageResult, sendMessageError } = {}) {
       async create(payload) {
         calls.create.push(payload);
         return { id: 99, ...payload };
+      },
+      async update(tabId, payload) {
+        calls.update.push({ tabId, payload });
+        if (updateError) {
+          throw updateError;
+        }
+        return { id: tabId, ...payload };
       },
     },
     runtime: {
@@ -158,7 +166,7 @@ function waitForAsyncTasks() {
   return new Promise((resolve) => setTimeout(resolve, 20));
 }
 
-test("popup capture launches deep-link inside active tab without opening extra tab", async () => {
+test("popup capture launches deep-link via tabs.update in active tab without opening extra tab", async () => {
   const { calls, listeners } = loadBackground();
   const response = await sendRuntimeMessage(listeners, { type: "capture_page" });
 
@@ -166,16 +174,25 @@ test("popup capture launches deep-link inside active tab without opening extra t
   assert.equal(response.deepLink, "snorgnote://new?data=test");
   assert.equal(response.launchedInPage, true);
   assert.equal(calls.create.length, 0);
-  const openMessage = calls.sendMessage.find(
-    (call) => call.payload && call.payload.type === "open_deeplink",
+  assert.equal(calls.update.length, 1);
+  assert.equal(calls.update[0].tabId, 7);
+  assert.equal(calls.update[0].payload.url, "snorgnote://new?data=test");
+  assert.equal(
+    calls.sendMessage.some((call) => call.payload && call.payload.type === "open_deeplink"),
+    false,
   );
-  assert.equal(Boolean(openMessage), true);
-  assert.equal(openMessage.tabId, 7);
-  assert.equal(openMessage.payload.deepLink, "snorgnote://new?data=test");
   assert.equal(
     calls.sendMessage.some((call) => call.payload && call.payload.type === "extract_page"),
     true,
   );
+});
+
+test("popup capture returns error when tabs.update launch fails", async () => {
+  const { listeners } = loadBackground({ updateError: new Error("update failed") });
+  const response = await sendRuntimeMessage(listeners, { type: "capture_page" });
+
+  assert.equal(response.ok, false);
+  assert.equal(response.error, "Cannot launch Snorgnote from extension context.");
 });
 
 test("context menu capture opens extension launcher tab", async () => {
