@@ -9,6 +9,7 @@ const CONTENT_PATH = path.join(__dirname, "..", "src", "extension", "content.js"
 function loadContent() {
   let messageHandler = null;
 
+  const location = { href: "https://example.com/articles/1" };
   const document = {
     title: "Example",
     body: {
@@ -30,8 +31,9 @@ function loadContent() {
     console,
     chrome,
     document,
-    location: { href: "https://example.com/articles/1" },
+    location,
     window: {
+      location,
       getSelection() {
         return {
           toString() {
@@ -49,7 +51,7 @@ function loadContent() {
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(CONTENT_PATH, "utf8"), context, { filename: "content.js" });
 
-  return { handler: messageHandler };
+  return { handler: messageHandler, location };
 }
 
 test("content script returns selected text", () => {
@@ -68,8 +70,8 @@ test("content script returns selected text", () => {
   assert.equal(JSON.stringify(responses), JSON.stringify([{ selectionText: "selected" }]));
 });
 
-test("content script ignores deep-link launch messages", () => {
-  const { handler } = loadContent();
+test("content script launches valid deep-link in current page", () => {
+  const { handler, location } = loadContent();
   const responses = [];
 
   handler(
@@ -80,5 +82,22 @@ test("content script ignores deep-link launch messages", () => {
     },
   );
 
-  assert.equal(responses.length, 0);
+  assert.equal(JSON.stringify(responses), JSON.stringify([{ ok: true }]));
+  assert.equal(location.href, "snorgnote://new?data=test");
+});
+
+test("content script rejects invalid deep-link launch messages", () => {
+  const { handler, location } = loadContent();
+  const responses = [];
+
+  handler(
+    { type: "open_deeplink", deepLink: "https://example.com" },
+    {},
+    (response) => {
+      responses.push(response);
+    },
+  );
+
+  assert.equal(JSON.stringify(responses), JSON.stringify([{ ok: false, error: "Invalid deep-link." }]));
+  assert.equal(location.href, "https://example.com/articles/1");
 });

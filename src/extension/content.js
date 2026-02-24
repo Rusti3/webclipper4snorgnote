@@ -312,6 +312,10 @@ function extractSelection() {
   return text.trim();
 }
 
+function isSnorgnoteDeepLink(value) {
+  return typeof value === "string" && /^snorgnote:\/\//i.test(value.trim());
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== "string") {
     return;
@@ -324,5 +328,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "extract_selection") {
     sendResponse({ selectionText: extractSelection() });
+    return;
+  }
+
+  if (message.type === "open_deeplink") {
+    const deepLink = typeof message.deepLink === "string" ? message.deepLink.trim() : "";
+    if (!isSnorgnoteDeepLink(deepLink)) {
+      sendResponse({ ok: false, error: "Invalid deep-link." });
+      return;
+    }
+
+    window.location.href = deepLink;
+    sendResponse({ ok: true });
   }
 });

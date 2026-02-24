@@ -1,4 +1,11 @@
-# notebooklm_runner
+﻿# notebooklm_runner
+
+## Саммари версии 0.4.6
+- Для кнопок `Save full page` и `Save selected text` в popup запуск `snorgnote://...` теперь делается из текущей активной страницы через `content script`.
+- Подтверждение браузера (`Сайт ... собирается открыть это приложение`) теперь показывается на той странице, с которой делается клиппинг, а не в окне расширения.
+- Popup больше не перенаправляет сам себя на deep-link, а показывает статус запуска из текущей страницы.
+- Добавлена проверка валидности deep-link в `content.js` с явной ошибкой для невалидных URL.
+- Обновлены тесты (`background/content/popup`) под новый поток запуска, все Node-тесты проходят.
 
 ## Саммари версии 0.4.5
 - Изменён источник запуска deep-link: теперь запуск делается из extension-контекста (`chrome-extension://...`), а не из страницы сайта.
@@ -129,3 +136,4 @@ cargo run -- deeplink "snorgnote://new?data=<...>"
 - `tests/extension.content.test.js`
 - `tests/extension.popup.test.js`
 - `tests/extension.launcher.test.js`
+

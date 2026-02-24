@@ -158,16 +158,23 @@ function waitForAsyncTasks() {
   return new Promise((resolve) => setTimeout(resolve, 20));
 }
 
-test("popup capture returns deep-link without opening extra tab", async () => {
+test("popup capture launches deep-link inside active tab without opening extra tab", async () => {
   const { calls, listeners } = loadBackground();
   const response = await sendRuntimeMessage(listeners, { type: "capture_page" });
 
   assert.equal(response.ok, true);
   assert.equal(response.deepLink, "snorgnote://new?data=test");
+  assert.equal(response.launchedInPage, true);
   assert.equal(calls.create.length, 0);
+  const openMessage = calls.sendMessage.find(
+    (call) => call.payload && call.payload.type === "open_deeplink",
+  );
+  assert.equal(Boolean(openMessage), true);
+  assert.equal(openMessage.tabId, 7);
+  assert.equal(openMessage.payload.deepLink, "snorgnote://new?data=test");
   assert.equal(
-    calls.sendMessage.some((call) => call.payload && call.payload.type === "open_deeplink"),
-    false,
+    calls.sendMessage.some((call) => call.payload && call.payload.type === "extract_page"),
+    true,
   );
 });
 

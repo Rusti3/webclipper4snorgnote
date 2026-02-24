@@ -70,15 +70,14 @@ async function runCaptureAction(type) {
       return;
     }
 
-    if (typeof result.deepLink !== "string" || !/^snorgnote:\/\//i.test(result.deepLink)) {
-      setStatus("error", "Deep-link is missing. Try again.");
+    if (result.launchedInPage !== true) {
+      setStatus("error", "Cannot confirm launch in current page. Try again.");
       await refreshRecentErrors();
       return;
     }
 
     const clippedLabel = result.clipped ? " (clipped)" : "";
-    setStatus("ok", `Launching Snorgnote${clippedLabel}...`);
-    window.location.href = result.deepLink;
+    setStatus("ok", `Launch requested from current page${clippedLabel}.`);
     await refreshRecentErrors();
   } catch (error) {
     setStatus("error", `Unexpected error: ${error.message || String(error)}`);

@@ -127,6 +127,30 @@ async function dispatchClip(payload) {
   };
 }
 
+async function launchDeepLinkInTab(tabId, deepLink) {
+  const normalized = typeof deepLink === "string" ? deepLink.trim() : "";
+  if (!/^snorgnote:\/\//i.test(normalized)) {
+    throw new Error("Generated deep-link is invalid.");
+  }
+
+  let response;
+  try {
+    response = await chrome.tabs.sendMessage(tabId, {
+      type: "open_deeplink",
+      deepLink: normalized,
+    });
+  } catch {
+    throw new Error("Cannot launch Snorgnote from this page.");
+  }
+
+  if (!response || response.ok !== true) {
+    const message = response && typeof response.error === "string"
+      ? response.error
+      : "Cannot launch Snorgnote from this page.";
+    throw new Error(message);
+  }
+}
+
 async function capturePage(tab) {
   assertClippableTab(tab);
   const extracted = await requestContentExtraction(tab.id, "extract_page");
@@ -192,11 +216,25 @@ async function runClipAction(context, action) {
 async function handlePopupAction(actionType) {
   const tab = await getActiveTab();
   if (actionType === "capture_page") {
-    return runClipAction("capture_page", () => capturePage(tab));
+    return runClipAction("capture_page", async () => {
+      const result = await capturePage(tab);
+      await launchDeepLinkInTab(tab.id, result.deepLink);
+      return {
+        ...result,
+        launchedInPage: true,
+      };
+    });
   }
 
   if (actionType === "capture_selection") {
-    return runClipAction("capture_selection", () => captureSelection(tab));
+    return runClipAction("capture_selection", async () => {
+      const result = await captureSelection(tab);
+      await launchDeepLinkInTab(tab.id, result.deepLink);
+      return {
+        ...result,
+        launchedInPage: true,
+      };
+    });
   }
 
   return {

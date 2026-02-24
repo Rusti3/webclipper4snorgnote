@@ -92,7 +92,8 @@ async function flush() {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
-test("popup capture launches deep-link from extension context", async () => {
+test("popup capture stays on popup and reports launch in current page", async () => {
+  const popupUrl = "chrome-extension://cnjifjpddelmedmihgijeibhnjfabmlf/src/extension/popup.html";
   const { elements, window } = loadPopup(async (payload) => {
     if (payload.type === "get_recent_errors") {
       return { ok: true, recentErrors: [] };
@@ -100,8 +101,8 @@ test("popup capture launches deep-link from extension context", async () => {
     if (payload.type === "capture_page") {
       return {
         ok: true,
-        deepLink: "snorgnote://new?data=test",
         clipped: false,
+        launchedInPage: true,
       };
     }
     return { ok: false, error: "unexpected" };
@@ -110,18 +111,19 @@ test("popup capture launches deep-link from extension context", async () => {
   elements["clip-page"].fire("click");
   await flush();
 
-  assert.equal(window.location.href, "snorgnote://new?data=test");
+  assert.equal(window.location.href, popupUrl);
+  assert.equal(elements.status.classList.has("ok"), true);
 });
 
-test("popup capture shows error when deep-link is missing", async () => {
+test("popup capture shows error when background returns launch failure", async () => {
   const { elements, window } = loadPopup(async (payload) => {
     if (payload.type === "get_recent_errors") {
       return { ok: true, recentErrors: [] };
     }
     if (payload.type === "capture_selection") {
       return {
-        ok: true,
-        clipped: false,
+        ok: false,
+        error: "Cannot launch Snorgnote from this page.",
       };
     }
     return { ok: false, error: "unexpected" };
