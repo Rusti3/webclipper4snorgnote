@@ -1,4 +1,4 @@
-importScripts("./payload.js", "./tab.js");
+importScripts("./payload.js");
 
 const CONTEXT_MENU_ID = "snorgnote-send-selection";
 const ERROR_STORAGE_KEY = "recentErrors";
@@ -55,6 +55,10 @@ async function ensureContextMenus() {
   });
 }
 
+function isHttpPage(url) {
+  return typeof url === "string" && /^https?:\/\//i.test(url);
+}
+
 async function getActiveTab() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return tabs[0] || null;
@@ -64,23 +68,9 @@ function assertClippableTab(tab) {
   if (!tab || typeof tab.id !== "number") {
     throw new Error("No active tab found.");
   }
-  if (!self.SnorgTab || typeof self.SnorgTab.isHttpPage !== "function") {
-    throw new Error("Tab helper is not available.");
+  if (!isHttpPage(tab.url)) {
+    throw new Error("Open a regular http/https page to clip content.");
   }
-  if (!self.SnorgTab.isHttpPage(tab.url)) {
-    const current = typeof tab.url === "string" ? tab.url : "";
-    const suffix = current ? ` Current tab: ${current}` : "";
-    throw new Error(`Open a regular http/https page to clip content.${suffix}`);
-  }
-}
-
-async function getClippableTabForPopup() {
-  if (!self.SnorgTab || typeof self.SnorgTab.pickClippableTab !== "function") {
-    throw new Error("Tab helper is not available.");
-  }
-  const activeTab = await getActiveTab();
-  const tabsInWindow = await chrome.tabs.query({ currentWindow: true });
-  return self.SnorgTab.pickClippableTab(activeTab, tabsInWindow);
 }
 
 async function requestContentExtraction(tabId, type) {
@@ -104,18 +94,48 @@ function markdownFromSelection(selectionText, pageUrl) {
   return `${body}${source}`;
 }
 
-async function openAppWithPayload(payload) {
+async function launchDeepLinkOnCurrentTab(tabId, deepLink) {
+  let response;
+  try {
+    response = await chrome.tabs.sendMessage(tabId, {
+      type: "open_deeplink",
+      deepLink,
+    });
+  } catch {
+    throw new Error(
+      "Cannot launch Snorgnote from this page. Open a regular website page and try again.",
+    );
+  }
+
+  if (!response || typeof response !== "object") {
+    throw new Error(
+      "Cannot launch Snorgnote from this page. Open a regular website page and try again.",
+    );
+  }
+
+  if (!response.ok) {
+    const message = typeof response.error === "string" && response.error.trim()
+      ? response.error.trim()
+      : "Cannot launch Snorgnote from this page. Open a regular website page and try again.";
+    throw new Error(message);
+  }
+}
+
+async function openAppWithPayload(tabId, payload) {
+  if (typeof tabId !== "number") {
+    throw new Error("No active tab found.");
+  }
   if (!self.SnorgPayload || typeof self.SnorgPayload.clipPayloadToDeepLink !== "function") {
     throw new Error("Payload encoder is not available.");
   }
 
   const encoded = self.SnorgPayload.clipPayloadToDeepLink(payload);
-  await chrome.tabs.create({ url: encoded.deepLink });
+  await launchDeepLinkOnCurrentTab(tabId, encoded.deepLink);
   return encoded;
 }
 
-async function dispatchClip(payload) {
-  const encoded = await openAppWithPayload(payload);
+async function dispatchClip(tabId, payload) {
+  const encoded = await openAppWithPayload(tabId, payload);
   return {
     deepLink: encoded.deepLink,
     clipped: encoded.clipped,
@@ -142,7 +162,7 @@ async function capturePage(tab) {
     source: "web-clipper",
   };
 
-  return dispatchClip(payload);
+  return dispatchClip(tab.id, payload);
 }
 
 async function captureSelection(tab, selectionFromMenu = "") {
@@ -167,7 +187,7 @@ async function captureSelection(tab, selectionFromMenu = "") {
     source: "web-clipper",
   };
 
-  return dispatchClip(payload);
+  return dispatchClip(tab.id, payload);
 }
 
 async function runClipAction(context, action) {
@@ -187,7 +207,7 @@ async function runClipAction(context, action) {
 }
 
 async function handlePopupAction(actionType) {
-  const tab = await getClippableTabForPopup();
+  const tab = await getActiveTab();
   if (actionType === "capture_page") {
     return runClipAction("capture_page", () => capturePage(tab));
   }
