@@ -10,6 +10,13 @@
 - Добавлена команда `install-protocol` для ручной проверки/переустановки регистрации.
 - Добавлен тест `tests/protocol_registration_tests.rs` на корректный формат команды запуска.
 
+## Саммари версии 0.4.2
+- Улучшен выбор вкладки в extension:
+  - если активная вкладка не `http/https` (например `chrome://extensions` или `about:blank`),
+  - расширение берёт последнюю обычную веб-вкладку (`http/https`) в текущем окне.
+- Ошибка теперь показывает текущий URL, когда клиппинг невозможен.
+- Добавлены тесты выбора вкладки: `tests/extension.tab.test.js`.
+
 ## Саммари версии 0.4.0
 - Убран helper API из пользовательского потока.
 - Расширение теперь передаёт контент напрямую в deep-link:
@@ -93,3 +100,4 @@ cargo run -- deeplink "snorgnote://new?data=<...>"
 
 ### Node
 - `tests/extension.payload.test.js`
+- `tests/extension.tab.test.js`

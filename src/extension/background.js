@@ -1,4 +1,4 @@
-importScripts("./payload.js");
+importScripts("./payload.js", "./tab.js");
 
 const CONTEXT_MENU_ID = "snorgnote-send-selection";
 const ERROR_STORAGE_KEY = "recentErrors";
@@ -55,10 +55,6 @@ async function ensureContextMenus() {
   });
 }
 
-function isHttpPage(url) {
-  return typeof url === "string" && /^https?:\/\//i.test(url);
-}
-
 async function getActiveTab() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return tabs[0] || null;
@@ -68,9 +64,23 @@ function assertClippableTab(tab) {
   if (!tab || typeof tab.id !== "number") {
     throw new Error("No active tab found.");
   }
-  if (!isHttpPage(tab.url)) {
-    throw new Error("Open a regular http/https page to clip content.");
+  if (!self.SnorgTab || typeof self.SnorgTab.isHttpPage !== "function") {
+    throw new Error("Tab helper is not available.");
   }
+  if (!self.SnorgTab.isHttpPage(tab.url)) {
+    const current = typeof tab.url === "string" ? tab.url : "";
+    const suffix = current ? ` Current tab: ${current}` : "";
+    throw new Error(`Open a regular http/https page to clip content.${suffix}`);
+  }
+}
+
+async function getClippableTabForPopup() {
+  if (!self.SnorgTab || typeof self.SnorgTab.pickClippableTab !== "function") {
+    throw new Error("Tab helper is not available.");
+  }
+  const activeTab = await getActiveTab();
+  const tabsInWindow = await chrome.tabs.query({ currentWindow: true });
+  return self.SnorgTab.pickClippableTab(activeTab, tabsInWindow);
 }
 
 async function requestContentExtraction(tabId, type) {
@@ -177,7 +187,7 @@ async function runClipAction(context, action) {
 }
 
 async function handlePopupAction(actionType) {
-  const tab = await getActiveTab();
+  const tab = await getClippableTabForPopup();
   if (actionType === "capture_page") {
     return runClipAction("capture_page", () => capturePage(tab));
   }
