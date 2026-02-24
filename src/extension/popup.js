@@ -2,6 +2,7 @@ const statusEl = document.getElementById("status");
 const clipPageButton = document.getElementById("clip-page");
 const clipSelectionButton = document.getElementById("clip-selection");
 const errorListEl = document.getElementById("error-list");
+const PENDING_POPUP_ACTION_KEY = "pendingPopupAction";
 
 function setBusy(isBusy) {
   clipPageButton.disabled = isBusy;
@@ -57,12 +58,17 @@ async function refreshRecentErrors() {
   }
 }
 
-async function runCaptureAction(type) {
+async function runCaptureAction(type, options = {}) {
   setBusy(true);
   setStatus("", "Working...");
 
   try {
-    const result = await chrome.runtime.sendMessage({ type });
+    const payload = { type };
+    if (type === "capture_selection" && typeof options.selectionText === "string") {
+      payload.selectionText = options.selectionText;
+    }
+
+    const result = await chrome.runtime.sendMessage(payload);
     if (!result || !result.ok) {
       const message = result && typeof result.error === "string" ? result.error : "Clipping failed.";
       setStatus("error", message);
@@ -87,6 +93,32 @@ async function runCaptureAction(type) {
   }
 }
 
+async function runPendingPopupAction() {
+  if (!chrome.storage || !chrome.storage.local) {
+    return;
+  }
+
+  let pending = null;
+  try {
+    const store = await chrome.storage.local.get(PENDING_POPUP_ACTION_KEY);
+    pending = store ? store[PENDING_POPUP_ACTION_KEY] : null;
+  } catch {
+    return;
+  }
+
+  if (!pending || typeof pending !== "object") {
+    return;
+  }
+
+  await chrome.storage.local.remove(PENDING_POPUP_ACTION_KEY).catch(() => {});
+  if (pending.actionType !== "capture_selection") {
+    return;
+  }
+
+  const selectionText = typeof pending.selectionText === "string" ? pending.selectionText : "";
+  runCaptureAction("capture_selection", { selectionText });
+}
+
 clipPageButton.addEventListener("click", () => {
   runCaptureAction("capture_page");
 });
@@ -96,3 +128,4 @@ clipSelectionButton.addEventListener("click", () => {
 });
 
 refreshRecentErrors();
+runPendingPopupAction();

@@ -2,6 +2,7 @@ importScripts("./payload.js");
 
 const CONTEXT_MENU_ID = "snorgnote-send-selection";
 const ERROR_STORAGE_KEY = "recentErrors";
+const PENDING_POPUP_ACTION_KEY = "pendingPopupAction";
 const MAX_ERROR_LOGS = 25;
 
 function nowIso() {
@@ -202,7 +203,7 @@ async function runClipAction(context, action) {
   }
 }
 
-async function handlePopupAction(actionType) {
+async function handlePopupAction(actionType, options = {}) {
   const tab = await getActiveTab();
   if (actionType === "capture_page") {
     return runClipAction("capture_page", async () => {
@@ -217,7 +218,8 @@ async function handlePopupAction(actionType) {
 
   if (actionType === "capture_selection") {
     return runClipAction("capture_selection", async () => {
-      const result = await captureSelection(tab);
+      const selectionText = typeof options.selectionText === "string" ? options.selectionText : "";
+      const result = await captureSelection(tab, selectionText);
       await launchDeepLinkInTab(tab.id, result.deepLink);
       return {
         ...result,
@@ -245,16 +247,18 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     return;
   }
 
-  runClipAction("context_menu_selection", () => captureSelection(tab, info.selectionText || ""))
-    .then(async (result) => {
-      if (result.ok) {
-        await openLauncherTab(result.deepLink);
-        return flashBadge("OK", "#16a34a");
-      }
-      return flashBadge("ERR", "#dc2626");
-    })
+  const pendingAction = {
+    actionType: "capture_selection",
+    selectionText: typeof info.selectionText === "string" ? info.selectionText : "",
+    createdAt: nowIso(),
+  };
+
+  chrome.storage.local.set({ [PENDING_POPUP_ACTION_KEY]: pendingAction })
+    .then(() => chrome.action.openPopup())
+    .then(() => flashBadge("OK", "#16a34a"))
     .catch(async (error) => {
-      await saveErrorLog("context_menu_launcher", error);
+      await chrome.storage.local.remove(PENDING_POPUP_ACTION_KEY).catch(() => {});
+      await saveErrorLog("context_menu_popup", error);
       flashBadge("ERR", "#dc2626");
     });
 });
@@ -265,7 +269,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "capture_page" || message.type === "capture_selection") {
-    handlePopupAction(message.type)
+    handlePopupAction(message.type, message)
       .then(sendResponse)
       .catch(async (error) => {
         await saveErrorLog("popup_message", error);

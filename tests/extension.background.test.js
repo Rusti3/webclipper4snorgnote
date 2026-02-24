@@ -5,6 +5,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const BACKGROUND_PATH = path.join(__dirname, "..", "src", "extension", "background.js");
+const PENDING_POPUP_ACTION_KEY = "pendingPopupAction";
 
 function loadBackground({ sendMessageResult, sendMessageError, updateError } = {}) {
   const calls = {
@@ -12,6 +13,8 @@ function loadBackground({ sendMessageResult, sendMessageError, updateError } = {
     create: [],
     getURL: [],
     update: [],
+    openPopup: 0,
+    storageSet: [],
   };
 
   const listeners = {
@@ -27,12 +30,17 @@ function loadBackground({ sendMessageResult, sendMessageError, updateError } = {
         async get() {
           return {};
         },
-        async set() {},
+        async set(payload) {
+          calls.storageSet.push(payload);
+        },
       },
     },
     action: {
       async setBadgeBackgroundColor() {},
       async setBadgeText() {},
+      async openPopup() {
+        calls.openPopup += 1;
+      },
     },
     contextMenus: {
       async removeAll() {},
@@ -195,7 +203,23 @@ test("popup capture returns error when tabs.update launch fails", async () => {
   assert.equal(response.error, "Cannot launch Snorgnote from extension context.");
 });
 
-test("context menu capture opens extension launcher tab", async () => {
+test("popup capture_selection forwards provided selection text and skips content extraction", async () => {
+  const { calls, listeners } = loadBackground();
+  const response = await sendRuntimeMessage(listeners, {
+    type: "capture_selection",
+    selectionText: "Selection from menu",
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.launchedInPage, true);
+  assert.equal(calls.update.length, 1);
+  assert.equal(
+    calls.sendMessage.some((call) => call.payload && call.payload.type === "extract_selection"),
+    false,
+  );
+});
+
+test("context menu capture opens popup and stores pending selection action", async () => {
   const { calls, listeners } = loadBackground();
   assert.equal(typeof listeners.onContextMenuClicked, "function");
 
@@ -213,17 +237,18 @@ test("context menu capture opens extension launcher tab", async () => {
 
   await waitForAsyncTasks();
 
-  assert.equal(calls.create.length, 1);
-  assert.equal(calls.getURL.length >= 1, true);
-  assert.equal(
-    calls.create[0].url.startsWith(
-      "chrome-extension://cnjifjpddelmedmihgijeibhnjfabmlf/src/extension/launcher.html",
-    ),
-    true,
+  assert.equal(calls.openPopup, 1);
+  assert.equal(calls.create.length, 0);
+  assert.equal(calls.update.length, 0);
+  assert.equal(calls.storageSet.length >= 1, true);
+  const pendingPayload = calls.storageSet.find((payload) =>
+    payload && Object.prototype.hasOwnProperty.call(payload, PENDING_POPUP_ACTION_KEY),
   );
-  assert.equal(calls.create[0].url.includes("deeplink="), true);
+  assert.equal(Boolean(pendingPayload), true);
+  assert.equal(pendingPayload[PENDING_POPUP_ACTION_KEY].actionType, "capture_selection");
+  assert.equal(pendingPayload[PENDING_POPUP_ACTION_KEY].selectionText, "Selected from context menu");
   assert.equal(
-    calls.sendMessage.some((call) => call.payload && call.payload.type === "open_deeplink"),
+    calls.sendMessage.some((call) => call.payload && call.payload.type === "extract_selection"),
     false,
   );
 });

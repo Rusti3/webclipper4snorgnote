@@ -5,6 +5,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const POPUP_PATH = path.join(__dirname, "..", "src", "extension", "popup.js");
+const PENDING_POPUP_ACTION_KEY = "pendingPopupAction";
 
 function createClassList() {
   const classes = new Set();
@@ -42,12 +43,21 @@ function createElement() {
   };
 }
 
-function loadPopup(sendMessageImpl) {
+function loadPopup({ sendMessageImpl, initialStore } = {}) {
   const elements = {
     status: createElement(),
     "clip-page": createElement(),
     "clip-selection": createElement(),
     "error-list": createElement(),
+  };
+  const store = {
+    ...(initialStore || {}),
+  };
+  const calls = {
+    sentMessages: [],
+    storageGet: [],
+    storageSet: [],
+    storageRemove: [],
   };
 
   const document = {
@@ -68,7 +78,33 @@ function loadPopup(sendMessageImpl) {
   const chrome = {
     runtime: {
       async sendMessage(payload) {
+        calls.sentMessages.push(payload);
         return sendMessageImpl(payload);
+      },
+    },
+    storage: {
+      local: {
+        async get(key) {
+          calls.storageGet.push(key);
+          if (typeof key === "string") {
+            return { [key]: store[key] };
+          }
+          return { ...store };
+        },
+        async set(payload) {
+          calls.storageSet.push(payload);
+          for (const [key, value] of Object.entries(payload || {})) {
+            store[key] = value;
+          }
+        },
+        async remove(key) {
+          calls.storageRemove.push(key);
+          if (Array.isArray(key)) {
+            key.forEach((entry) => delete store[entry]);
+            return;
+          }
+          delete store[key];
+        },
       },
     },
   };
@@ -85,7 +121,7 @@ function loadPopup(sendMessageImpl) {
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(POPUP_PATH, "utf8"), context, { filename: "popup.js" });
 
-  return { elements, window };
+  return { elements, window, calls };
 }
 
 async function flush() {
@@ -94,7 +130,7 @@ async function flush() {
 
 test("popup capture stays on popup and reports launch in current page", async () => {
   const popupUrl = "chrome-extension://cnjifjpddelmedmihgijeibhnjfabmlf/src/extension/popup.html";
-  const { elements, window } = loadPopup(async (payload) => {
+  const { elements, window } = loadPopup({ sendMessageImpl: async (payload) => {
     if (payload.type === "get_recent_errors") {
       return { ok: true, recentErrors: [] };
     }
@@ -106,7 +142,7 @@ test("popup capture stays on popup and reports launch in current page", async ()
       };
     }
     return { ok: false, error: "unexpected" };
-  });
+  }});
 
   elements["clip-page"].fire("click");
   await flush();
@@ -116,7 +152,7 @@ test("popup capture stays on popup and reports launch in current page", async ()
 });
 
 test("popup capture shows error when background returns launch failure", async () => {
-  const { elements, window } = loadPopup(async (payload) => {
+  const { elements, window } = loadPopup({ sendMessageImpl: async (payload) => {
     if (payload.type === "get_recent_errors") {
       return { ok: true, recentErrors: [] };
     }
@@ -127,7 +163,7 @@ test("popup capture shows error when background returns launch failure", async (
       };
     }
     return { ok: false, error: "unexpected" };
-  });
+  }});
 
   elements["clip-selection"].fire("click");
   await flush();
@@ -137,4 +173,36 @@ test("popup capture shows error when background returns launch failure", async (
     "chrome-extension://cnjifjpddelmedmihgijeibhnjfabmlf/src/extension/popup.html",
   );
   assert.equal(elements.status.classList.has("error"), true);
+});
+
+test("popup auto-runs pending context menu capture_selection action", async () => {
+  const { elements, calls } = loadPopup({
+    initialStore: {
+      [PENDING_POPUP_ACTION_KEY]: {
+        actionType: "capture_selection",
+        selectionText: "Selected from context menu",
+      },
+    },
+    sendMessageImpl: async (payload) => {
+      if (payload.type === "get_recent_errors") {
+        return { ok: true, recentErrors: [] };
+      }
+      if (payload.type === "capture_selection") {
+        return {
+          ok: true,
+          clipped: false,
+          launchedInPage: true,
+        };
+      }
+      return { ok: false, error: "unexpected" };
+    },
+  });
+
+  await flush();
+
+  const captureMessage = calls.sentMessages.find((payload) => payload.type === "capture_selection");
+  assert.equal(Boolean(captureMessage), true);
+  assert.equal(captureMessage.selectionText, "Selected from context menu");
+  assert.equal(calls.storageRemove.includes(PENDING_POPUP_ACTION_KEY), true);
+  assert.equal(elements.status.classList.has("ok"), true);
 });

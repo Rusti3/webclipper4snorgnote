@@ -1,5 +1,12 @@
 ﻿# notebooklm_runner
 
+## Саммари версии 0.4.8
+- Обработчик ПКМ по выделенному тексту теперь открывает popup расширения и запускает тот же алгоритм, что и кнопка `Save selected text`.
+- `background` сохраняет отложенное действие (`pendingPopupAction`) с выделением и вызывает `chrome.action.openPopup()`.
+- `popup` при открытии автоматически подхватывает `pendingPopupAction`, запускает `capture_selection` и очищает отложенное действие из storage.
+- Добавлена передача `selectionText` из popup в background для точного сохранения именно выделенного текста без повторного извлечения со страницы.
+- Обновлены тесты `extension.background` и `extension.popup`, все Node-тесты проходят.
+
 ## Саммари версии 0.4.7
 - Для кнопок `Save full page` и `Save selected text` запуск deep-link перенесён в `background` через `chrome.tabs.update(activeTabId, { url: "snorgnote://..." })`.
 - Теперь системное подтверждение браузера показывает инициатором расширение (`chrome-extension://...`), а не текущий сайт.
@@ -143,5 +150,6 @@ cargo run -- deeplink "snorgnote://new?data=<...>"
 - `tests/extension.content.test.js`
 - `tests/extension.popup.test.js`
 - `tests/extension.launcher.test.js`
+
 
 
