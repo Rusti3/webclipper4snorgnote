@@ -2,6 +2,14 @@
 
 Проект принимает клипы из browser extension и сохраняет их в Markdown-заметки.
 
+## Саммари версии 0.4.1
+- Добавлена авто-регистрация deep-link протокола `snorgnote://` при старте приложения на Windows.
+- Регистрация выполняется в `HKCU\Software\Classes\snorgnote` (без админ-прав).
+- Если протокол уже настроен, повторной записи нет.
+- Если путь к `exe` изменился, запись автоматически обновляется.
+- Добавлена команда `install-protocol` для ручной проверки/переустановки регистрации.
+- Добавлен тест `tests/protocol_registration_tests.rs` на корректный формат команды запуска.
+
 ## Саммари версии 0.4.0
 - Убран helper API из пользовательского потока.
 - Расширение теперь передаёт контент напрямую в deep-link:
@@ -15,6 +23,7 @@
 
 ## Что изменилось для пользователя
 - Не нужно запускать helper вручную.
+- После первого запуска приложения deep-link протокол регистрируется автоматически.
 - Расширение может отправлять выделение и страницу сразу в приложение через deep-link.
 - Заметка автоматически появляется в папке `notes`.
 
@@ -44,7 +53,17 @@ cargo test
 npm test
 ```
 
-### 2) Ручной запуск обработчика deep-link
+### 2) Первый запуск (авто-регистрация протокола)
+```powershell
+cargo run --
+```
+
+### 3) Ручная переустановка регистрации протокола (опционально)
+```powershell
+cargo run -- install-protocol
+```
+
+### 4) Ручной запуск обработчика deep-link
 ```powershell
 cargo run -- deeplink "snorgnote://new?data=<...>"
 ```
@@ -70,6 +89,7 @@ cargo run -- deeplink "snorgnote://new?data=<...>"
 - `tests/deeplink_new_tests.rs`
 - `tests/clipper_direct_flow_tests.rs`
 - `tests/note_writer_tests.rs`
+- `tests/protocol_registration_tests.rs`
 
 ### Node
 - `tests/extension.payload.test.js`
