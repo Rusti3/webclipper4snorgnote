@@ -70,7 +70,8 @@ async function runCaptureAction(type) {
       return;
     }
 
-    setStatus("ok", `Sent successfully. clipId: ${result.clipId}`);
+    const clippedLabel = result.clipped ? " (clipped)" : "";
+    setStatus("ok", `Sent successfully${clippedLabel}.`);
     await refreshRecentErrors();
   } catch (error) {
     setStatus("error", `Unexpected error: ${error.message || String(error)}`);

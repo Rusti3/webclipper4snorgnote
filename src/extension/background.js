@@ -1,9 +1,8 @@
-const HELPER_CLIPS_URL = "http://127.0.0.1:27124/clips";
-const DEEP_LINK_BASE = "snorgnote://new";
+importScripts("./payload.js");
+
 const CONTEXT_MENU_ID = "snorgnote-send-selection";
 const ERROR_STORAGE_KEY = "recentErrors";
 const MAX_ERROR_LOGS = 25;
-const HELPER_TIMEOUT_MS = 10_000;
 
 function nowIso() {
   return new Date().toISOString();
@@ -22,7 +21,7 @@ async function saveErrorLog(context, error) {
     id: crypto.randomUUID(),
     context,
     message,
-    at: nowIso()
+    at: nowIso(),
   };
 
   try {
@@ -52,7 +51,7 @@ async function ensureContextMenus() {
   chrome.contextMenus.create({
     id: CONTEXT_MENU_ID,
     title: "Send selected text to Snorgnote",
-    contexts: ["selection"]
+    contexts: ["selection"],
   });
 }
 
@@ -69,7 +68,6 @@ function assertClippableTab(tab) {
   if (!tab || typeof tab.id !== "number") {
     throw new Error("No active tab found.");
   }
-
   if (!isHttpPage(tab.url)) {
     throw new Error("Open a regular http/https page to clip content.");
   }
@@ -92,74 +90,27 @@ function markdownFromSelection(selectionText, pageUrl) {
   if (!body) {
     return "";
   }
-
   const source = pageUrl ? `\n\n[Source](${pageUrl})` : "";
   return `${body}${source}`;
 }
 
-async function postClip(payload) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, HELPER_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(HELPER_CLIPS_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
-
-    const text = await response.text();
-    let body = null;
-    try {
-      body = text ? JSON.parse(text) : null;
-    } catch {
-      body = null;
-    }
-
-    if (!response.ok) {
-      const serverError = body && typeof body.error === "string" ? body.error : "Helper API request failed.";
-      throw new Error(serverError);
-    }
-
-    if (!body || typeof body.clipId !== "string") {
-      throw new Error("Helper API returned invalid response.");
-    }
-
-    return body;
-  } catch (error) {
-    if (error && error.name === "AbortError") {
-      throw new Error("Helper API timeout. Ensure your local helper is running.");
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
+async function openAppWithPayload(payload) {
+  if (!self.SnorgPayload || typeof self.SnorgPayload.clipPayloadToDeepLink !== "function") {
+    throw new Error("Payload encoder is not available.");
   }
-}
 
-function deepLinkUrl(clipId) {
-  const params = new URLSearchParams({
-    clipId,
-    source: "web-clipper"
-  });
-  return `${DEEP_LINK_BASE}?${params.toString()}`;
-}
-
-async function openAppWithClip(clipId) {
-  const url = deepLinkUrl(clipId);
-  await chrome.tabs.create({ url });
-  return url;
+  const encoded = self.SnorgPayload.clipPayloadToDeepLink(payload);
+  await chrome.tabs.create({ url: encoded.deepLink });
+  return encoded;
 }
 
 async function dispatchClip(payload) {
-  const helperResult = await postClip(payload);
-  const deepLink = await openAppWithClip(helperResult.clipId);
-
+  const encoded = await openAppWithPayload(payload);
   return {
-    clipId: helperResult.clipId,
-    deepLink
+    deepLink: encoded.deepLink,
+    clipped: encoded.clipped,
+    originalLength: encoded.originalLength,
+    finalLength: encoded.finalLength,
   };
 }
 
@@ -177,7 +128,8 @@ async function capturePage(tab) {
     title: typeof extracted.title === "string" && extracted.title.trim() ? extracted.title.trim() : (tab.title || "Untitled"),
     url: typeof extracted.url === "string" && extracted.url.trim() ? extracted.url.trim() : (tab.url || ""),
     contentMarkdown,
-    createdAt: nowIso()
+    createdAt: nowIso(),
+    source: "web-clipper",
   };
 
   return dispatchClip(payload);
@@ -201,7 +153,8 @@ async function captureSelection(tab, selectionFromMenu = "") {
     title: tab.title || "Untitled",
     url: tab.url || "",
     contentMarkdown: markdownFromSelection(selectionText, tab.url || ""),
-    createdAt: nowIso()
+    createdAt: nowIso(),
+    source: "web-clipper",
   };
 
   return dispatchClip(payload);
@@ -212,13 +165,13 @@ async function runClipAction(context, action) {
     const result = await action();
     return {
       ok: true,
-      ...result
+      ...result,
     };
   } catch (error) {
     await saveErrorLog(context, error);
     return {
       ok: false,
-      error: errorMessage(error)
+      error: errorMessage(error),
     };
   }
 }
@@ -235,7 +188,7 @@ async function handlePopupAction(actionType) {
 
   return {
     ok: false,
-    error: "Unknown popup action."
+    error: "Unknown popup action.",
   };
 }
 
@@ -257,7 +210,6 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
       if (result.ok) {
         return flashBadge("OK", "#16a34a");
       }
-
       return flashBadge("ERR", "#dc2626");
     })
     .catch(() => {

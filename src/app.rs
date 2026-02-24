@@ -1,18 +1,17 @@
 use std::path::PathBuf;
-use std::time::Duration;
 
 use anyhow::Result;
 use uuid::Uuid;
 
 use crate::deeplink::parse_new_clip_deeplink;
-use crate::helper_client::{HelperClient, HelperHealth};
 use crate::logging::AppLogger;
 use crate::notes::writer::{NoteData, write_markdown_note};
+
+pub const MAX_CONTENT_MARKDOWN_CHARS: usize = 120_000;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub notes_dir: PathBuf,
-    pub helper_base_url: String,
     pub timeout_sec: u64,
 }
 
@@ -20,60 +19,56 @@ pub struct AppConfig {
 pub struct ClipRunResult {
     pub clip_id: Uuid,
     pub note_path: PathBuf,
-    pub delete_error: Option<String>,
+    pub clipped: bool,
 }
 
 pub fn run_from_new_deeplink(uri: &str, config: &AppConfig) -> Result<ClipRunResult> {
     let logger = AppLogger::new()?;
-    logger.info("clipper run started");
+    logger.info("clipper direct run started");
+    logger.info(&format!("configured timeout_sec={}", config.timeout_sec));
 
     let deep_link = parse_new_clip_deeplink(uri)?;
-    logger.info(&format!("deep-link parsed: clipId={}", deep_link.clip_id));
+    logger.info("deep-link payload parsed");
 
-    let helper = HelperClient::new(
-        config.helper_base_url.clone(),
-        Duration::from_secs(config.timeout_sec.max(1)),
-    )?;
-    let clip = helper.fetch_clip(deep_link.clip_id)?;
-    logger.info("clip payload fetched from helper");
+    let clip_id = Uuid::new_v4();
+    let (content_markdown, clipped) = clip_content_markdown(
+        &deep_link.payload.content_markdown,
+        MAX_CONTENT_MARKDOWN_CHARS,
+    );
+    if clipped {
+        logger.warn("content was clipped due to size limit");
+    }
 
     let note_path = write_markdown_note(
         &config.notes_dir,
         &NoteData {
-            clip_id: clip.clip_id,
-            source: deep_link.source,
-            clip_type: clip.payload.clip_type.to_string(),
-            title: clip.payload.title,
-            url: clip.payload.url,
-            content_markdown: clip.payload.content_markdown,
-            created_at: clip.payload.created_at,
+            clip_id,
+            source: deep_link.payload.source,
+            clip_type: deep_link.payload.clip_type.to_string(),
+            title: deep_link.payload.title,
+            url: deep_link.payload.url,
+            content_markdown,
+            created_at: deep_link.payload.created_at,
         },
     )?;
     logger.info(&format!("note saved: {}", note_path.display()));
 
-    let delete_error = match helper.delete_clip(clip.clip_id) {
-        Ok(()) => {
-            logger.info("clip deleted from helper");
-            None
-        }
-        Err(err) => {
-            let message = format!("{err:#}");
-            logger.warn(&format!("failed to delete clip from helper: {message}"));
-            Some(message)
-        }
-    };
-
     Ok(ClipRunResult {
-        clip_id: clip.clip_id,
+        clip_id,
         note_path,
-        delete_error,
+        clipped,
     })
 }
 
-pub fn check_helper_health(config: &AppConfig) -> Result<HelperHealth> {
-    let helper = HelperClient::new(
-        config.helper_base_url.clone(),
-        Duration::from_secs(config.timeout_sec.max(1)),
-    )?;
-    helper.health()
+fn clip_content_markdown(content: &str, max_chars: usize) -> (String, bool) {
+    if content.chars().count() <= max_chars {
+        return (content.to_string(), false);
+    }
+    let clipped: String = content.chars().take(max_chars).collect();
+    let marker = format!(
+        "\n\n[CLIPPED: original_length={} chars, limit={} chars]",
+        content.chars().count(),
+        max_chars
+    );
+    (format!("{clipped}{marker}"), true)
 }
